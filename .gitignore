@@ -1,0 +1,12 @@
+# Ignore Python virtual environment
+.venv/
+
+# Ignore environment variables file
+configs/.env
+
+# Ignore logs
+logs/
+
+# Ignore data outputs
+data/raw/
+data/index/
