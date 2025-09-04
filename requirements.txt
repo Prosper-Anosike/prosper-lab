@@ -1,0 +1,18 @@
+# Web framework
+fastapi
+uvicorn
+
+# AI/ML libraries
+openai
+faiss-cpu
+llama-index
+
+# Document processing
+pypdf
+python-docx
+python-pptx
+openpyxl
+
+# Utilities
+tiktoken
+numpy
