@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from packages.rag.loaders.document_loader import DocumentLoader
 from packages.rag.retrieval.retriever import Retriever
 from packages.rag.prompting.llm_prompting import LLMPrompting
+from packages.rag.chunking.text_chunker import TextChunker
+from packages.rag.store.vector_store import VectorStore
 
 app = FastAPI()
 
@@ -21,8 +23,22 @@ def ingest_documents():
     try:
         input_dir = "data/raw"
         output_dir = "data/raw"
+        index_dir = "data/index"
+
+        # Step 1: Extract text from documents
         loader = DocumentLoader(input_dir, output_dir)
         loader.process_documents()
+        print("done DocumentLoader")
+        print("begin chunkking")
+        # Step 2: Chunk the text
+        chunker = TextChunker(input_dir,output_dir)
+        chunker.process_text_files()
+        print("done chunkking")
+        print("begin vectorstore process")
+        # Step 3: Generate embeddings and build index
+        store = VectorStore(index_dir)
+        store.build_index(input_dir )
+        print("done vectorstore process")
         return {"status": "success", "message": "Documents ingested successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -36,7 +52,7 @@ def ask_question(request: RequestQuery):
         retriever = Retriever(index_dir)
         chunks = retriever.orchestrate_retrieval(request.query, chunk_dir)
 
-        llm = LLMPrompting()
+        llm = LLMPrompting()    
         prompt = llm.generate_prompt(request.query, chunks)
         response = llm.get_response(prompt)
 
