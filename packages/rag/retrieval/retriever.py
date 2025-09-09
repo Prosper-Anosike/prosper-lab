@@ -2,7 +2,7 @@ import faiss
 import numpy as np
 from pathlib import Path
 from typing import List
-from llama_index import SimpleKeywordTableIndex
+# from llama_index import SimpleKeywordTableIndex  # TODO: Fix llama_index import
 
 class Retriever:
     def __init__(self, index_dir: str, top_k: int = 5):
