@@ -1,10 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from pathlib import Path
+from pydantic import BaseModel
 from packages.rag.loaders.document_loader import DocumentLoader
 from packages.rag.retrieval.retriever import Retriever
 from packages.rag.prompting.llm_prompting import LLMPrompting
 
 app = FastAPI()
+
+class RequestQuery(BaseModel):
+    query : str
 
 @app.get("/health")
 def health_check():
@@ -24,19 +28,19 @@ def ingest_documents():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ask")
-def ask_question(query: str):
+def ask_question(request: RequestQuery):
     """Accept natural language queries and return answers."""
     try:
         index_dir = "data/index"
         chunk_dir = "data/index"
         retriever = Retriever(index_dir)
-        chunks = retriever.orchestrate_retrieval(query, chunk_dir)
+        chunks = retriever.orchestrate_retrieval(request.query, chunk_dir)
 
         llm = LLMPrompting()
-        prompt = llm.generate_prompt(query, chunks)
+        prompt = llm.generate_prompt(request.query, chunks)
         response = llm.get_response(prompt)
 
-        return {"query": query, "response": response}
+        return {"query": request.query, "response": response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
