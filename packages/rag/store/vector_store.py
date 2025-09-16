@@ -54,10 +54,9 @@ class VectorStore:
             return np.empty((0, 1536))
         
         try:
-            # Azure OpenAI configuration
             azure_endpoint = "https://byupwai5996918872.openai.azure.com/"
             api_version = "2024-12-01-preview"
-            api_key = settings.OPENAI_API_KEY
+            api_key = settings.AZURE_OPENAI_API_KEY
             
             client = AzureOpenAI(
                 api_version=api_version,

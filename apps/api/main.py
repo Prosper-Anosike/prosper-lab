@@ -9,70 +9,74 @@ from packages.rag.store.vector_store import VectorStore
 
 app = FastAPI()
 
+RAW_DIR = "data/raw"
+CHUNKS_DIR = "data/chunks"
+INDEX_DIR = "data/index"
+
 class RequestQuery(BaseModel):
-    query : str
+    query: str
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
     return {"status": "healthy"}
 
 @app.post("/ingest")
 def ingest_documents():
-    """Trigger document ingestion."""
     try:
-        input_dir = "data/raw"
-        output_dir = "data/raw"
-        index_dir = "data/index"
+        Path(RAW_DIR).mkdir(parents=True, exist_ok=True)
+        Path(CHUNKS_DIR).mkdir(parents=True, exist_ok=True)
+        Path(INDEX_DIR).mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Extract text from documents
-        loader = DocumentLoader(input_dir, output_dir)
+        loader = DocumentLoader(RAW_DIR, RAW_DIR)
         loader.process_documents()
-        print("done DocumentLoader")
-        print("begin chunkking")
-        # Step 2: Chunk the text
-        chunker = TextChunker(input_dir,output_dir)
+
+        chunker = TextChunker(RAW_DIR, CHUNKS_DIR)
         chunker.process_text_files()
-        print("done chunkking")
-        print("begin vectorstore process")
-        # Step 3: Generate embeddings and build index
-        store = VectorStore(index_dir)
-        store.build_index(input_dir )
-        print("done vectorstore process")
+
+        store = VectorStore(INDEX_DIR)
+        store.build_index(CHUNKS_DIR)
+
         return {"status": "success", "message": "Documents ingested successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ask")
 def ask_question(request: RequestQuery):
-    """Accept natural language queries and return answers."""
     try:
-        index_dir = "data/index"
-        chunk_dir = "data/index"
-        retriever = Retriever(index_dir)
-        chunks = retriever.orchestrate_retrieval(request.query, chunk_dir)
+        retriever = Retriever(INDEX_DIR)
+        chunks = retriever.orchestrate_retrieval(request.query, CHUNKS_DIR)
 
-        llm = LLMPrompting()    
-        prompt = llm.generate_prompt(request.query, chunks)
-        response = llm.get_response(prompt)
+        # No-retrieval guard: don't let the LLM improvise
+        if not chunks or (len(chunks) == 1 and chunks[0] == "[NO_RELEVANT_SOURCES_FOUND]"):
+            return {
+                "query": request.query,
+                "response": "No relevant sources found.",
+                "chunks_used": 0
+            }
 
-        return {"query": request.query, "response": response}
+        llm = LLMPrompting()
+        messages = llm.generate_prompt(request.query, chunks)
+        response = llm.get_response(messages)
+
+        return {"query": request.query, "response": response, "chunks_used": len(chunks)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stats")
 def system_stats():
-    """Show system statistics."""
     try:
-        raw_dir = Path("data/raw")
-        index_dir = Path("data/index")
+        raw_dir = Path(RAW_DIR)
+        chunks_dir = Path(CHUNKS_DIR)
+        index_dir = Path(INDEX_DIR)
 
-        raw_files = len(list(raw_dir.iterdir()))
-        indexed_files = len(list(index_dir.iterdir()))
+        raw_files = len([p for p in raw_dir.iterdir() if p.is_file()])
+        chunk_files = len([p for p in chunks_dir.iterdir() if p.is_file() and p.name.endswith("_chunks.txt")])
+        has_index = (index_dir / "faiss_index").exists()
 
         return {
             "raw_files": raw_files,
-            "indexed_files": indexed_files
+            "chunk_files": chunk_files,
+            "index_exists": has_index
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

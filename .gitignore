@@ -214,6 +214,7 @@ data/index/
 data/embeddings/
 data/models/
 data/outputs/
+data/chunks
 
 # Log files
 logs/
