@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pathlib import Path
 from pydantic import BaseModel
 from packages.rag.loaders.document_loader import DocumentLoader
@@ -6,12 +6,42 @@ from packages.rag.retrieval.retriever import Retriever
 from packages.rag.prompting.llm_prompting import LLMPrompting
 from packages.rag.chunking.text_chunker import TextChunker
 from packages.rag.store.vector_store import VectorStore
+from utils.RAGLogger import RAGLogger
+import time
 
 app = FastAPI()
+
+# Logger initialization
+logger = RAGLogger('api')
 
 RAW_DIR = "data/raw"
 CHUNKS_DIR = "data/chunks"
 INDEX_DIR = "data/index"
+
+# Add middleware for logger
+
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    start_time = time.time()
+
+    logger.info(
+        f"Request received: {request.method} {request.url.path}",
+        method=request.method,
+        path=request.url.path,
+        client_ip=str(request.client.host)
+    )
+
+    response = await call_next(request)
+
+    # Log response
+    process_time = time.time() - start_time
+    logger.info(
+        f"Request completed: {response.status_code}",
+        status_code=response.status_code,
+        process_time_ms = round(process_time * 1000, 2)
+    )
+    return response
+
 
 class RequestQuery(BaseModel):
     query: str
