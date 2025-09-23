@@ -54,8 +54,8 @@ class VectorStore:
             return np.empty((0, 1536))
         
         try:
-            azure_endpoint = "https://byupwai5996918872.openai.azure.com/"
-            api_version = "2024-12-01-preview"
+            azure_endpoint = settings.AZURE_OPENAI_ENDPOINT
+            api_version = settings.AZURE_OPENAI_API_VERSION
             api_key = settings.AZURE_OPENAI_API_KEY
             
             client = AzureOpenAI(
@@ -73,7 +73,7 @@ class VectorStore:
         for i, chunk in enumerate(chunks):
             print(f"[generate_embeddings] Processing chunk {i+1}/{len(chunks)} (length: {len(chunk)} chars)")
             try:
-                embedding = client.embeddings.create(input=chunk, model=self.model).data[0].embedding
+                embedding = client.embeddings.create(input=chunk, model=settings.AZURE_EMBED_DEPLOYMENT).data[0].embedding
                 embeddings.append(embedding)
                 print(f"[generate_embeddings] Successfully generated embedding for chunk {i+1}")
             except Exception as e:
