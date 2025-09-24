@@ -13,11 +13,19 @@ class RAGLogger:
         # Create logs directory
         Path('logs').mkdir(exist_ok=True)
 
-        # Single file handler to start
+        # File handler (INFO)
         handler = logging.FileHandler('logs/app.log')
+        handler.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(name)s | %(message)s ')
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
+
+        # Console handler (DEBUG) - For development use only
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        console_formatter=logging.Formatter('%(levelname)s | %(name)s | %(message)s')
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
         
     def info(self, message:str, **data):
         if data:
@@ -34,3 +42,7 @@ class RAGLogger:
             message = f"{message} | Data: {json.dumps(data)}"
         self.logger.warning(message)
 
+    def debug(self, message: str, **data):
+        if data:
+            message = f"{message} | Data: {json.dumps(data)}"
+        self.logger.debug(message)
