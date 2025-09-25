@@ -20,4 +20,11 @@ class Settings:
     INDEX_PATH = os.getenv("INDEX_PATH")
     PORT = int(os.getenv("PORT", "8000"))
 
+    CHUNK_SIZE = int(os.getenv("CHUNK_SIZE"))
+    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP"))
+    CHUNK_STRATEGY = os.getenv("CHUNK_STRATEGY")
+    INPUT_DIR = os.getenv("INPUT_DIR")
+    OUTPUT_DIR = os.getenv("OUTPUT_DIR")
+    MANIFEST_FILE = os.getenv("MANIFEST_FILE")
+
 settings = Settings()

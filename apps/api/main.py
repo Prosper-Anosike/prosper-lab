@@ -6,6 +6,7 @@ from packages.rag.retrieval.retriever import Retriever
 from packages.rag.prompting.llm_prompting import LLMPrompting
 from packages.rag.chunking.text_chunker import TextChunker
 from packages.rag.store.vector_store import VectorStore
+from packages.rag.pipeline.ingestion_pipeline import IngestionPipeline
 from utils.RAGLogger import RAGLogger
 import time
 
@@ -52,22 +53,84 @@ def health_check():
 
 @app.post("/ingest")
 def ingest_documents():
+    """Legacy endpoint - use /ingestion for detailed results"""
     try:
-        Path(RAW_DIR).mkdir(parents=True, exist_ok=True)
-        Path(CHUNKS_DIR).mkdir(parents=True, exist_ok=True)
-        Path(INDEX_DIR).mkdir(parents=True, exist_ok=True)
-
-        loader = DocumentLoader(RAW_DIR, RAW_DIR)
-        loader.process_documents()
-
-        chunker = TextChunker(RAW_DIR, CHUNKS_DIR)
-        chunker.process_text_files()
-
+        # Use the new improved pipeline
+        pipeline = IngestionPipeline()
+        results = pipeline.run_ingestion()
+        
+        # Build vector index after ingestion
         store = VectorStore(INDEX_DIR)
-        store.build_index(CHUNKS_DIR)
-
-        return {"status": "success", "message": "Documents ingested successfully."}
+        store.build_index(INDEX_DIR)  # Use INDEX_DIR since chunks are now there
+        
+        # Return simple response for backward compatibility
+        file_stats = results["file_statistics"]
+        if file_stats["failed_files"] > 0:
+            return {
+                "status": "partial_success", 
+                "message": f"Processed {file_stats['successful_files']}/{file_stats['total_files_discovered']} files successfully. {file_stats['failed_files']} files failed."
+            }
+        else:
+            return {
+                "status": "success", 
+                "message": f"Successfully processed {file_stats['successful_files']} files and created {results['content_statistics']['total_chunks_created']} chunks."
+            }
     except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ingestion")
+def run_ingestion_pipeline():
+    """
+    Run the improved ingestion pipeline with detailed results.
+    Returns comprehensive information about processing results.
+    """
+    try:
+        logger.info("Starting ingestion pipeline via API")
+        
+        # Run the improved pipeline
+        pipeline = IngestionPipeline()
+        results = pipeline.run_ingestion()
+        
+        # Build vector index after ingestion
+        logger.info("Building vector index")
+        store = VectorStore(INDEX_DIR)
+        store.build_index(INDEX_DIR)  # Use INDEX_DIR since chunks are now there
+        
+        # Add vector index info to results
+        results["vector_index"] = {
+            "status": "built",
+            "index_path": INDEX_DIR,
+            "chunks_indexed": results["content_statistics"]["total_chunks_created"]
+        }
+        
+        logger.info(
+            "Ingestion pipeline completed via API",
+            files_processed=results["file_statistics"]["files_processed"],
+            successful_files=results["file_statistics"]["successful_files"],
+            total_chunks=results["content_statistics"]["total_chunks_created"]
+        )
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Ingestion pipeline failed via API: {e}")
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+
+@app.get("/ingestion/status")
+def get_ingestion_status():
+    """Get current ingestion pipeline status"""
+    try:
+        pipeline = IngestionPipeline()
+        status = pipeline.get_pipeline_status()
+        
+        # Add vector index status
+        index_path = Path(INDEX_DIR) / "faiss_index"
+        status["vector_index_exists"] = index_path.exists()
+        
+        return status
+    except Exception as e:
+        logger.error(f"Failed to get ingestion status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ask")

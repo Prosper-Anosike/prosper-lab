@@ -4,23 +4,25 @@ from typing import List
 import tiktoken
 from utils.RAGLogger import RAGLogger
 import time
+from configs.settings import settings
 
 class TextChunker:
-    def __init__(self, input_dir: str, output_dir: str, chunk_size: int = 512, overlap: int = 256):
+    def __init__(self, input_dir: str, output_dir: str, chunk_size: int = None, overlap: int = None):
         self.logger = RAGLogger('TextChunker')
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
-        self.chunk_size = chunk_size
-        self.overlap = overlap
+        self.chunk_size = chunk_size if chunk_size is not None else settings.CHUNK_SIZE
+        self.overlap = overlap if overlap is not None else settings.CHUNK_OVERLAP
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.info(f"TextChunker initialized with chunk_size={self.chunk_size}, overlap={self.overlap}")
 
     def load_text_files(self) -> List[Path]:
         """Load text files from the input directory."""
         self.logger.debug("Starting text file discovery")
         return [file for file in self.input_dir.iterdir() if file.suffix == '.txt']
 
-    def chunk_text(self, text: str) -> List[str]:
-        """Split text into chunks with overlap."""
+    def chunk_text(self, text: str) -> tuple[List[str], int]:
+        """Split text into chunks with overlap. Return (chunks, chunk_count)"""
         start_time = time.time()
         
         self.logger.debug(
@@ -38,6 +40,8 @@ class TextChunker:
             chunks.append(tokenizer.decode(chunk))
 
         processing_time = time.time() - start_time
+        chunk_count = len(chunks)
+
 
         self.logger.debug(
             "Text chunking completed",
@@ -49,7 +53,7 @@ class TextChunker:
 
         )
 
-        return chunks
+        return chunks, chunk_count
 
     def save_chunks(self, file_name: str, chunks: List[str]):
         """Save text chunks to the output directory."""
@@ -128,7 +132,7 @@ class TextChunker:
                 with open(file, 'r', encoding='utf-8') as f:
                     text = f.read()
 
-                chunks = self.chunk_text(text)
+                chunks, chunk_count = self.chunk_text(text)
                 self.save_chunks(file.stem, chunks)
 
                 file_processing_time = time.time() - file_start_time
@@ -173,6 +177,23 @@ class TextChunker:
             average_time_per_file=round(total_time / len(files), 3) if files else 0,
             average_chunks_per_file = round(total_chunks / successful_files, 1) if successful_files else 0
         )
+
+    def get_chunk_count(self, text: str) -> int:
+        """Get the number of chunks that would be created from text without actually chunking"""
+        tokenizer = tiktoken.get_encoding("cl100k_base")
+        tokens = tokenizer.encode(text)
+        
+        if len(tokens) <= self.chunk_size:
+            return 1
+        
+        chunk_count = 0
+        for i in range(0, len(tokens), self.chunk_size - self.overlap):
+            chunk_count += 1
+            if i + self.chunk_size >= len(tokens):
+                break
+        
+        return chunk_count
+
 
 
 if __name__ == "__main__":

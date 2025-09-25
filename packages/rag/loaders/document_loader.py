@@ -217,8 +217,11 @@ class DocumentLoader:
             )
             raise
 
-    def process_documents(self):
-        """Process all documents in the input directory and subfolders."""
+    def process_documents(self) -> dict:
+        """
+        Process all documents and return results summary.
+        Continues processing even if individual files fail.
+        """
         start_time = time.time()
         files = self.load_documents()
 
@@ -229,70 +232,126 @@ class DocumentLoader:
             batch_id=f"batch_{int(start_time)}"
         )
 
-        successful_files = 0
-        failed_files = 0
+        results = {
+            "successful_files": [],
+            "failed_files": [],
+            "total_files": len(files),
+            "processing_time": 0
+        }
 
         for file in files:
             file_start_time = time.time()
-            self.logger.info(
-                f"Processing document: {file.name}",
-                file_path=str(file),
-                file_type=file.suffix,
-                file_size_bytes=file.stat().st_size
-            )
-
+            
             try:
-                if file.suffix == '.pdf':
-                    text = self.parse_pdf(file)
-                elif file.suffix == '.docx':
-                    text = self.parse_docx(file)
-                elif file.suffix == '.pptx':
-                    text = self.parse_pptx(file)
-                elif file.suffix == '.xlsx':
-                    text = self.parse_xlsx(file)
-                else:
-                    self.logger.warning(
-                        f"Unsupported file type encountered: {file.suffix}",
-                        file_path=str(file),
-                        file_type=file.suffix
+                # Parse the file using the new method
+                text, metadata = self.parse_single_file(file)
+                processing_time = time.time() - file_start_time
+                
+                if metadata["status"] == "success":
+                    # Save the text file
+                    rel_path = str(file.relative_to(self.input_dir)).replace(os.sep, '_')
+                    self.save_text(rel_path, text)
+                    
+                    results["successful_files"].append({
+                        "file_path": file,
+                        "relative_path": rel_path,
+                        "text": text,
+                        "metadata": metadata,
+                        "processing_time": processing_time
+                    })
+                    
+                    self.logger.info(
+                        f"Successfully processed: {file.name}",
+                        processing_time_seconds=round(processing_time, 3),
+                        text_length=len(text)
                     )
-                    continue
-                # Use relative path from input_dir for unique file name
-                rel_path = str(file.relative_to(self.input_dir)).replace(os.sep, '_')
-                self.save_text(rel_path, text)
-                processing_time = time.time() - file_start_time
-                self.logger.info(
-                    f"Successfully processed: {file.name}",
-                    file_path=str(file),
-                    output_file=f"{rel_path}.txt",
-                    processing_time_seconds = round(processing_time,3),
-                    success=True
-                )
-                successful_files += 1
-
+                else:
+                    results["failed_files"].append({
+                        "file_path": file,
+                        "metadata": metadata,
+                        "processing_time": processing_time
+                    })
+                    
             except Exception as e:
+                # This catches any unexpected errors not handled in parse_single_file
                 processing_time = time.time() - file_start_time
-                self.logger.error(
-                    f"Failed to process document: {file.name}",
-                    file_path=str(file),
-                    file_type=file.suffix,
-                    error_message=str(e),
-                    processing_time_seconds=round(processing_time,3),
-                    success=False
-                )
+                self.logger.error(f"Unexpected error processing {file.name}: {e}")
+                
+                results["failed_files"].append({
+                    "file_path": file,
+                    "metadata": {
+                        "status": "failed",
+                        "error_message": f"Unexpected error: {str(e)}",
+                        "text_length": 0
+                    },
+                    "processing_time": processing_time
+                })
 
-                failed_files += 1
-        
         total_time = time.time() - start_time
+        results["processing_time"] = total_time
+        
         self.logger.info(
             f"Document processing batch completed",
-            total_files_processed = len(files),
-            successful_files=successful_files,
-            failed_files=failed_files,
-            success_rate=round((successful_files / len(files)) * 100, 2) if files else 0,
-            total_processing_time_seconds=round(total_time, 3),
-            average_time_per_file=round(total_time / len(files) , 3) if files else 0
+            total_files=results["total_files"],
+            successful_files=len(results["successful_files"]),
+            failed_files=len(results["failed_files"]),
+            success_rate=round((len(results["successful_files"]) / results["total_files"]) * 100, 2) if results["total_files"] > 0 else 0,
+            total_processing_time_seconds=round(total_time, 3)
         )
+
+        return results
+    
+    def get_file_metadata(self, file_path: Path) -> dict:
+        """Get file metadata for manifest tracking"""
+        try:
+            stat = file_path.stat()
+            return {
+                "file_size": stat.st_size,
+                "last_modified": stat.st_mtime,
+                "file_type": file_path.suffix.lower()
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting metadata for {file_path}: {e}")
+            return {"file_size": 0, "last_modified": 0, "file_type": "unknown"}
+
+    def parse_single_file(self, file_path: Path) -> tuple[str, dict]:
+        """
+        Parse a single file and return (text, metadata).
+        Returns empty string and error info if parsing fails.
+        """
+        try:
+            self.logger.info(f"Parsing file: {file_path.name}")
+            
+            if file_path.suffix.lower() == '.pdf':
+                text = self.parse_pdf(file_path)
+            elif file_path.suffix.lower() == '.docx':
+                text = self.parse_docx(file_path)
+            elif file_path.suffix.lower() == '.pptx':
+                text = self.parse_pptx(file_path)
+            elif file_path.suffix.lower() == '.xlsx':
+                text = self.parse_xlsx(file_path)
+            else:
+                raise ValueError(f"Unsupported file type: {file_path.suffix}")
+            
+            metadata = self.get_file_metadata(file_path)
+            metadata.update({
+                "status": "success",
+                "error_message": None,
+                "text_length": len(text)
+            })
+            
+            return text, metadata
+            
+        except Exception as e:
+            self.logger.error(f"Failed to parse {file_path.name}: {e}")
+            metadata = self.get_file_metadata(file_path)
+            metadata.update({
+                "status": "failed",
+                "error_message": str(e),
+                "text_length": 0
+            })
+            return "", metadata
+
 
 if __name__ == "__main__":
     import os
