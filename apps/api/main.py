@@ -51,33 +51,6 @@ class RequestQuery(BaseModel):
 def health_check():
     return {"status": "healthy"}
 
-@app.post("/ingest")
-def ingest_documents():
-    """Legacy endpoint - use /ingestion for detailed results"""
-    try:
-        # Use the new improved pipeline
-        pipeline = IngestionPipeline()
-        results = pipeline.run_ingestion()
-        
-        # Build vector index after ingestion
-        store = VectorStore(INDEX_DIR)
-        store.build_index(INDEX_DIR)  # Use INDEX_DIR since chunks are now there
-        
-        # Return simple response for backward compatibility
-        file_stats = results["file_statistics"]
-        if file_stats["failed_files"] > 0:
-            return {
-                "status": "partial_success", 
-                "message": f"Processed {file_stats['successful_files']}/{file_stats['total_files_discovered']} files successfully. {file_stats['failed_files']} files failed."
-            }
-        else:
-            return {
-                "status": "success", 
-                "message": f"Successfully processed {file_stats['successful_files']} files and created {results['content_statistics']['total_chunks_created']} chunks."
-            }
-    except Exception as e:
-        logger.error(f"Ingestion failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ingestion")
 def run_ingestion_pipeline():
