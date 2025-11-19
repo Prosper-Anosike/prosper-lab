@@ -16,4 +16,5 @@ openpyxl
 # Utilities
 tiktoken
 numpy
+pandas==2.3.3
 python-dotenv
