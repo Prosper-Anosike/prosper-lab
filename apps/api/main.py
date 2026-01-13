@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from pathlib import Path
 from pydantic import BaseModel
+from configs.settings import settings
 from packages.rag.loaders.document_loader import DocumentLoader
 from packages.rag.retrieval.retriever import Retriever
 from packages.rag.prompting.llm_prompting import LLMPrompting
@@ -15,9 +16,9 @@ app = FastAPI()
 # Logger initialization
 logger = RAGLogger('api')
 
-RAW_DIR = "data/raw"
-CHUNKS_DIR = "data/chunks"
-INDEX_DIR = "data/index"
+RAW_DIR = settings.INPUT_DIR
+CHUNKS_DIR = settings.OUTPUT_DIR
+INDEX_DIR = settings.INDEX_PATH or settings.OUTPUT_DIR
 
 # Add middleware for logger
 
@@ -68,7 +69,7 @@ def run_ingestion_pipeline():
         # Build vector index after ingestion
         logger.info("Building vector index")
         store = VectorStore(INDEX_DIR)
-        store.build_index(INDEX_DIR)  # Use INDEX_DIR since chunks are now there
+        store.build_index(CHUNKS_DIR)
         
         # Add vector index info to results
         results["vector_index"] = {
@@ -110,9 +111,12 @@ def get_ingestion_status():
 def ask_question(request: RequestQuery):
     try:
         retriever = Retriever(INDEX_DIR)
-        chunks = retriever.orchestrate_retrieval(request.query, CHUNKS_DIR)
+        retrieval = retriever.orchestrate_retrieval(request.query, CHUNKS_DIR)
+        chunks = retrieval.get("chunks", [])
+        citations = retrieval.get("citations", [])
+        retrieval_stats = retrieval.get("stats")
 
-        # No-retrieval guard: don't let the LLM improvise
+        # No-retrieval guard: don't let the summarizer improvise
         if not chunks or (len(chunks) == 1 and chunks[0] == "[NO_RELEVANT_SOURCES_FOUND]"):
             return {
                 "query": request.query,
@@ -121,10 +125,20 @@ def ask_question(request: RequestQuery):
             }
 
         llm = LLMPrompting()
-        messages = llm.generate_prompt(request.query, chunks)
-        response = llm.get_response(messages)
+        answer_payload = llm.generate_answer(
+            query=request.query,
+            chunks=chunks,
+            citations=citations,
+            retrieval_stats=retrieval_stats,
+        )
 
-        return {"query": request.query, "response": response, "chunks_used": len(chunks)}
+        return {
+            "query": request.query,
+            "response": answer_payload["answer"],
+            "chunks_used": len(chunks),
+            "citations": answer_payload["citations"],
+            "summary_stats": answer_payload["stats"],
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

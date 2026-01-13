@@ -3,24 +3,27 @@ from pathlib import Path
 import faiss
 import numpy as np
 from typing import List
-from openai import AzureOpenAI
+import time
+from sentence_transformers import SentenceTransformer
+
 from configs.settings import settings
 from utils.RAGLogger import RAGLogger
-import time
 
 class VectorStore:
-    def __init__(self, index_dir: str, model: str = "text-embedding-ada-002"):
+    def __init__(self, index_dir: str, model: str = "all-MiniLM-L6-v2"):
         self.logger = RAGLogger('VectorStore')
         self.index_dir = Path(index_dir)
-        self.model = model
+        self.model = model or "all-MiniLM-L6-v2"
         self.index_dir.mkdir(parents=True, exist_ok=True)
-        self.index = faiss.IndexFlatL2(1536) 
+        self.embedder = SentenceTransformer(self.model)
+        self.embedding_dimension = self.embedder.get_sentence_embedding_dimension()
+        self.index = faiss.IndexFlatL2(self.embedding_dimension)
 
         self.logger.info(
             "VectorStore initialized",
             index_dir=index_dir,
             model=model,
-            faiss_dimension=1536,
+            faiss_dimension=self.embedding_dimension,
             index_type="IndexFlatL2"
         )
 
@@ -85,105 +88,54 @@ class VectorStore:
         return chunks
 
     def generate_embeddings(self, chunks: List[str]) -> np.ndarray:
-        """Generate embeddings for text chunks using Azure OpenAI API."""
+        """Generate embeddings for text chunks using a local SentenceTransformer model."""
         start_time = time.time()
 
 
         if not chunks:
             self.logger.warning("No chunks provided for embedding generation")
-            return np.empty((0, 1536))
+            return np.empty((0, self.embedding_dimension))
         
         self.logger.info(
             "Starting embedding generation",
             chunks_count=len(chunks),
             model=self.model,
-            estimated_tokens=sum(len(chunk.split()) for chunk in chunks) * 1.3  # Rough estimate
-         )
-        
+            embedding_dimension=self.embedding_dimension
+        )
+
+        batch_start = time.time()
         try:
-            azure_endpoint = settings.AZURE_OPENAI_ENDPOINT
-            api_version = settings.AZURE_OPENAI_API_VERSION
-            api_key = settings.AZURE_OPENAI_API_KEY
-            
-            client = AzureOpenAI(
-                api_version=api_version,
-                azure_endpoint=azure_endpoint,
-                api_key=api_key,
+            embeddings = self.embedder.encode(
+                chunks,
+                batch_size=16,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+                normalize_embeddings=False,
             )
-
-            self.logger.debug("Azure OpenAI client initialized successfully")
-
-
         except Exception as e:
             self.logger.error(
-                "Failed to initialize Azure OpenAI client",
-                error_type = type(e).__name__,
+                "Local embedding generation failed",
+                error_type=type(e).__name__,
                 error_message=str(e)
             )
             raise
-        
-        embeddings = []
-        successful_embeddings = 0
-        failed_embeddings = 0
-        total_api_time = 0
-        for i, chunk in enumerate(chunks):
-            chunk_start_time = time.time()
 
-            self.logger.debug(
-            "Processing chunk for embedding",
-            chunk_number=i+1,
-            total_chunks=len(chunks),
-            chunk_length=len(chunk),
-            chunk_words=len(chunk.split())
-        )
-            try:
-                embedding = client.embeddings.create(input=chunk, model=settings.AZURE_EMBED_DEPLOYMENT).data[0].embedding
-                embeddings.append(embedding)
-                successful_embeddings += 1
+        if embeddings.dtype != np.float32:
+            embeddings = embeddings.astype(np.float32)
 
-                chunk_time = time.time() - chunk_start_time
-                total_api_time += chunk_time
-
-                self.logger.debug(
-                    "Embedding generated successfully",
-                    chunk_number=i+1,
-                    embedding_dimension=len(embedding),
-                    api_call_time_seconds=round(chunk_time, 3)
-               )
-            except Exception as e:
-
-                failed_embeddings += 1
-                chunk_time = time.time() - chunk_start_time
-                total_api_time += chunk_time
-
-                self.logger.error(
-                    "Failed to generate embedding",
-                    chunk_number=i+1,
-                    chunk_length=len(chunk),
-                    error_type=type(e).__name__,
-                    error_message=str(e),
-                    api_call_time_seconds=round(chunk_time, 3)
-                )
-                raise
-        
-        result = np.vstack(embeddings)
+        total_time = time.time() - start_time
+        batch_time = time.time() - batch_start
+        result = np.asarray(embeddings)
         total_time = time.time() - start_time
 
-        # Cost estimation (rough)
-        estimated_tokens = sum(len(chunk.split()) for chunk in chunks) * 1.3
-        estimated_cost = (estimated_tokens / 1000) * 0.0001  # Rough estimate
-        
         self.logger.info(
             "Embedding generation completed",
             embeddings_shape=list(result.shape),
-            successful_embeddings=successful_embeddings,
-            failed_embeddings=failed_embeddings,
-            total_api_calls=len(chunks),
+            successful_embeddings=result.shape[0],
+            failed_embeddings=0,
+            total_batches=1,
             total_processing_time_seconds=round(total_time, 3),
-            total_api_time_seconds=round(total_api_time, 3),
-            average_time_per_embedding=round(total_api_time / len(chunks), 3),
-            estimated_tokens=int(estimated_tokens),
-            estimated_cost_usd=round(estimated_cost, 4)
+            embedding_batch_time_seconds=round(batch_time, 3)
         )
         return result
 
